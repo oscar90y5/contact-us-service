@@ -8,3 +8,5 @@ django-cors-headers==4.7.0
 
 # Swagger
 drf-spectacular==0.28.0
+
+requests==2.32.5
