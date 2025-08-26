@@ -2,3 +2,4 @@
 ./nginx/contact-us-local.key
 .env.local
 .env.prod
+servidor-gratis.pem

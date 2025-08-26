@@ -1,0 +1,50 @@
+services:
+  contact-us-nginx:
+    image: nginx:1.25-alpine
+    container_name: contact-us-nginx
+    restart: unless-stopped
+    depends_on:
+      - contact-us-django
+    ports:
+      - "12000:12000"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/contact-us-local.crt:/etc/nginx/certs/contact-us-local.crt:ro
+      - ./nginx/contact-us-local.key:/etc/nginx/certs/contact-us-local.key:ro
+      - static-data:/static:ro
+
+  contact-us-django:
+    image: ${DJANGO_IMAGE}
+    container_name: contact-us-django
+    restart: unless-stopped
+    depends_on:
+      - contact-us-db
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DATABASE_HOST: ${DATABASE_HOST}
+      DATABASE_NAME: ${DATABASE_NAME}
+      DATABASE_USER: ${DATABASE_USER}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+      DEBUG: ${DEBUG}
+    ports:
+      - "8000"
+    volumes:
+      - static-data:/static
+    command: ["./entry_point.sh"]
+
+  contact-us-db:
+    image: postgres:14.2
+    container_name: contact-us-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DATABASE_USER}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${DATABASE_NAME}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    ports:
+      - "5432"
+
+volumes:
+  db-data:
+  static-data:
