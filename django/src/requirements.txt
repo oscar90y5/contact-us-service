@@ -1,0 +1,10 @@
+django==5.2.5
+daphne==4.2.1
+djangorestframework==3.16.1
+psycopg2-binary==2.9.10
+factory-boy==3.3.3
+
+django-cors-headers==4.7.0
+
+# Swagger
+drf-spectacular==0.28.0
