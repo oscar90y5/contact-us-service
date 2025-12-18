@@ -30,7 +30,7 @@ AUTH_USER_MODEL = 'users.User'
 
 ALLOWED_HOSTS = ["*"]
 
-CORS_ALLOWED_ORIGINS = ["http://localhost:3000", "https://www.auri-chatbot.es"]
+CORS_ALLOWED_ORIGINS = ["http://localhost:3000", "https://www.auri-chatbot.es", "https://siceo.dev"]
 
 CORS_ALLOW_HEADERS = [
     "content-type",
