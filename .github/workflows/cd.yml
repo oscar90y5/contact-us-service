@@ -61,6 +61,12 @@ jobs:
           username: ${{ needs.get-secrets.outputs.docker_username }}
           password: ${{ needs.get-secrets.outputs.docker_password }}
 
+      - name: Load environment variables
+        id: load-vars
+        run: |
+          PYTHON_VERSION=$(grep PYTHON_VERSION .env.common | cut -d '=' -f2)
+          echo "python_version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+
       - name: Build and push Django image
         uses: docker/build-push-action@v5
         with:
@@ -68,6 +74,8 @@ jobs:
           push: true
           tags: |
             ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          build-args: |
+            PYTHON_VERSION=${{ steps.load-vars.outputs.python_version }}
           cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache,mode=max
 
