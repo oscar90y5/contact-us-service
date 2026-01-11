@@ -14,6 +14,9 @@ jobs:
     outputs:
       postgres_version: ${{ steps.env.outputs.POSTGRES_VERSION }}
       python_version: ${{ steps.env.outputs.PYTHON_VERSION }}
+      db_name: test_db
+      db_user: test_user
+      db_password: test_pass
     steps:
       - uses: actions/checkout@v4
       - id: env
@@ -26,17 +29,17 @@ jobs:
     runs-on: ubuntu-latest
     env:
         DJANGO_SECRET_KEY: 'cumgl4!imagd=p(n8*20&5qv6ay^39-s-7%^mo&xb$&)uf+7&%'
-        DB_NAME: test_db
-        DB_USER: test_user
-        DB_PASSWORD: test_pass
+        DB_NAME: ${{ needs.load-env.outputs.db_name }}
+        DB_USER: ${{ needs.load-env.outputs.db_user }}
+        DB_PASSWORD: ${{ needs.load-env.outputs.db_password }}
         DB_HOST: localhost
     services:
       postgres:
         image: postgres:${{ needs.load-env.outputs.postgres_version }}
         env:
-          POSTGRES_DB: ${{ env.DB_NAME }}
-          POSTGRES_USER: ${{ env.DB_USER }}
-          POSTGRES_PASSWORD: ${{ env.test_pass }}
+          POSTGRES_DB: ${{ needs.load-env.outputs.db_name }}
+          POSTGRES_USER: ${{ needs.load-env.outputs.db_user }}
+          POSTGRES_PASSWORD: ${{ needs.load-env.outputs.db_password }}
         ports:
           - 5432:5432
         options: >-
