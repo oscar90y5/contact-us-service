@@ -93,29 +93,7 @@ jobs:
           role-to-assume: arn:aws:iam::830921557045:role/GitHubActions-contact-us-prod
           aws-region: eu-west-1
 
-      - name: Wait for EC2 to be ready and SSM agent
-        env:
-          EC2_INSTANCE_ID: i-0d2e68ef91140e8dd
-        run: |
-          echo "Waiting for EC2 instance and SSM agent to be ready (timeout 10m)..."
-          START=$(date +%s)
-          TIMEOUT=600
-          while true; do
-            STATE=$(aws ec2 describe-instances --instance-ids "$EC2_INSTANCE_ID" --query "Reservations[].Instances[].State.Name" --output text 2>/dev/null || echo "unknown")
-            echo "EC2 state: $STATE"
-            if [ "$STATE" = "running" ]; then
-              COUNT=$(aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$EC2_INSTANCE_ID" --query "length(InstanceInformationList[?InstanceId=='$EC2_INSTANCE_ID'])" --output text 2>/dev/null || echo "0")
-              if [ "$COUNT" -ge 1 ]; then
-                echo "SSM agent available and instance running."
-                break
-              fi
-            fi
-            if [ $(( $(date +%s) - START )) -gt $TIMEOUT ]; then
-              echo "Timeout waiting for EC2/SSM." >&2
-              exit 1
-            fi
-            sleep 10
-          done
+#
 
 #      - name: Load environment configuration
 #        id: load-env
