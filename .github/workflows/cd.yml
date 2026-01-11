@@ -41,6 +41,7 @@ jobs:
           aws-region: eu-west-1
 
       - name: Fetch secrets from AWS Secrets Manager
+        id: export-secrets
         run: |
           SECRET_JSON=$(aws secretsmanager get-secret-value \
             --secret-id contact-us-service/production \
