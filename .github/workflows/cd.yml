@@ -339,6 +339,7 @@ jobs:
       - name: Deploy Application via SSM
         env:
           EC2_INSTANCE_ID: i-0d2e68ef91140e8dd
+          DJANGO_IMAGE_TAG: ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
         run: |
           # Enviar comando y guardar el ID
           COMMAND_ID=$(aws ssm send-command \
@@ -346,9 +347,18 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
               "cd contact-us-service",
+              "# Obtener secretos de AWS Secrets Manager",
+              "aws secretsmanager get-secret-value --secret-id contact-us-service/production --query SecretString --output text > /tmp/secrets.json",
+              "# Crear archivo .env.secrets",
+              "cat /tmp/secrets.json | jq -r \"to_entries|map(\\\"\\(.key)=\\(.value)\\\")|.[]\" > .env.secrets",
+              "rm /tmp/secrets.json",
+              "# Añadir DJANGO_IMAGE al .env.secrets",
+              "echo \"DJANGO_IMAGE='"${DJANGO_IMAGE_TAG}"'\" >> .env.secrets",
+              "# Git pull",
               "git reset --hard",
               "git pull origin main",
-              "docker compose -f contact-us-docker-compose.yml --env-file .env.common --env-file .env.prod up -d --pull always"
+              "# Deployment con todos los archivos .env",
+              "docker-compose -f contact-us-docker-compose.yml --env-file .env.common --env-file .env.prod --env-file .env.secrets up -d --pull always"
             ]' \
             --output text \
             --query 'Command.CommandId')
