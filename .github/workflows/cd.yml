@@ -30,6 +30,9 @@ jobs:
   get-secrets:
     name: Get Secrets from AWS Secrets Manager
     runs-on: ubuntu-latest
+    outputs:
+      docker_username: ${{ steps.export-secrets.outputs.DOCKER_USERNAME }}
+      docker_password: ${{ steps.export-secrets.outputs.DOCKER_PASSWORD }}
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -44,16 +47,18 @@ jobs:
             --query SecretString \
             --output text)
 
-          echo "$SECRET_JSON" > secrets.json
-
-      - name: Export secrets as env vars
-        run: |
-          echo "$(<secrets.json)" | jq -r 'to_entries|map("\(.key)=\(.value)")|.[]' >> $GITHUB_ENV
-
+          DOCKER_USERNAME=$(echo "$SECRET_JSON" | jq -r '.DOCKER_USERNAME')
+          DOCKER_PASSWORD=$(echo "$SECRET_JSON" | jq -r '.DOCKER_PASSWORD')
+          
+          echo "DOCKER_USERNAME=$DOCKER_USERNAME" >> $GITHUB_OUTPUT
+          echo "DOCKER_PASSWORD=$DOCKER_PASSWORD" >> $GITHUB_OUTPUT
 
   build-and-push:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
+    needs:
+      - load-env
+      - get-secrets
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -64,8 +69,8 @@ jobs:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ env.DOCKER_USERNAME }}
-          password: ${{ env.DOCKER_PASSWORD }}
+          username: ${{ needs.get-secrets.outputs.docker_username }}
+          password: ${{ needs.get-secrets.outputs.docker_password }}
 
       - name: Build and push Django image
         uses: docker/build-push-action@v5
@@ -73,13 +78,14 @@ jobs:
           context: ./django
           push: true
           tags: |
-            ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
-          cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache,mode=max
+            ${{ needs.load-env.outputs.django_image }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ needs.load-env.outputs.django_image }}:buildcache
+          cache-to: type=registry,ref=${{ needs.load-env.outputs.django_image }}:buildcache,mode=max
 
   deploy-application:
     name: Deploy Application to EC2
     runs-on: ubuntu-latest
+    needs: build-and-push
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
