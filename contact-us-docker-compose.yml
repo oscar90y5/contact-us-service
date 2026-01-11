@@ -35,7 +35,7 @@ services:
     command: ["./entry_point.sh"]
 
   contact-us-db:
-    image: postgres:14.2
+    image: "postgres:${POSTGRES_VERSION}"
     container_name: contact-us-db
     restart: unless-stopped
     environment:
