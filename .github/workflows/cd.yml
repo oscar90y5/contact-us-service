@@ -17,16 +17,6 @@ env:
   DOCKER_IMAGE: osferna/contact-us-django
 
 jobs:
-  load-env:
-    runs-on: ubuntu-latest
-    outputs:
-      django_image: ${{ steps.env.outputs.DJANGO_IMAGE }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: env
-        run: |
-          echo "DJANGO_IMAGE=$(grep DJANGO_IMAGE .env.prod | cut -d'=' -f2)" >> $GITHUB_OUTPUT
-
   get-secrets:
     name: Get Secrets from AWS Secrets Manager
     runs-on: ubuntu-latest
@@ -57,9 +47,7 @@ jobs:
   build-and-push:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    needs:
-      - load-env
-      - get-secrets
+    needs: get-secrets
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -79,9 +67,9 @@ jobs:
           context: ./django
           push: true
           tags: |
-            ${{ needs.load-env.outputs.django_image }}:${{ github.sha }}
-          cache-from: type=registry,ref=${{ needs.load-env.outputs.django_image }}:buildcache
-          cache-to: type=registry,ref=${{ needs.load-env.outputs.django_image }}:buildcache,mode=max
+            ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache,mode=max
 
   deploy-application:
     name: Deploy Application to EC2
