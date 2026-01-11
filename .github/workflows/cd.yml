@@ -1,0 +1,464 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-west-1
+  DOCKER_IMAGE: osferna/contact-us-django
+
+jobs:
+  load-env:
+    runs-on: ubuntu-latest
+    outputs:
+      django_image: ${{ steps.env.outputs.DJANGO_IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: env
+        run: |
+          echo "DJANGO_IMAGE=$(grep DJANGO_IMAGE .env.prod | cut -d'=' -f2)" >> $GITHUB_OUTPUT
+
+  get-secrets:
+    name: Get Secrets from AWS Secrets Manager
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::830921557045:role/GitHubActions-contact-us-prod
+          aws-region: eu-west-1
+
+      - name: Fetch secrets from AWS Secrets Manager
+        run: |
+          SECRET_JSON=$(aws secretsmanager get-secret-value \
+            --secret-id contact-us-service/production \
+            --query SecretString \
+            --output text)
+
+          echo "$SECRET_JSON" > secrets.json
+
+      - name: Export secrets as env vars
+        run: |
+          echo "$(<secrets.json)" | jq -r 'to_entries|map("\(.key)=\(.value)")|.[]' >> $GITHUB_ENV
+
+
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ env.DOCKER_PASSWORD }}
+
+      - name: Build and push Django image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./django
+          push: true
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache,mode=max
+
+  deploy-application:
+    name: Deploy Application to EC2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::830921557045:role/GitHubActions-contact-us-prod
+          aws-region: eu-west-1
+
+      - name: Wait for EC2 to be ready and SSM agent
+        env:
+          EC2_INSTANCE_ID: i-0d2e68ef91140e8dd
+        run: |
+          echo "Waiting for EC2 instance and SSM agent to be ready (timeout 10m)..."
+          START=$(date +%s)
+          TIMEOUT=600
+          while true; do
+            STATE=$(aws ec2 describe-instances --instance-ids "$EC2_INSTANCE_ID" --query "Reservations[].Instances[].State.Name" --output text 2>/dev/null || echo "unknown")
+            echo "EC2 state: $STATE"
+            if [ "$STATE" = "running" ]; then
+              COUNT=$(aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$EC2_INSTANCE_ID" --query "length(InstanceInformationList[?InstanceId=='$EC2_INSTANCE_ID'])" --output text 2>/dev/null || echo "0")
+              if [ "$COUNT" -ge 1 ]; then
+                echo "SSM agent available and instance running."
+                break
+              fi
+            fi
+            if [ $(( $(date +%s) - START )) -gt $TIMEOUT ]; then
+              echo "Timeout waiting for EC2/SSM." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
+#      - name: Load environment configuration
+#        id: load-env
+#        run: |
+#          # Load environment variables from .env file
+#          ENV_FILE=".env.${{ github.event.inputs.environment }}"
+#
+#          DB_NAME=$(grep "^DB_NAME=" "$ENV_FILE" | cut -d'=' -f2)
+#          echo "db_name=$DB_NAME" >> $GITHUB_OUTPUT
+#
+#          DB_USER=$(grep "^DB_USER=" "$ENV_FILE" | cut -d'=' -f2)
+#          echo "db_user=$DB_USER" >> $GITHUB_OUTPUT
+#
+#          DEBUG=$(grep "^DEBUG=" "$ENV_FILE" | cut -d'=' -f2)
+#          echo "debug=$DEBUG" >> $GITHUB_OUTPUT
+#
+#          AWS_REGION=$(grep "^AWS_REGION=" "$ENV_FILE" | cut -d'=' -f2)
+#          echo "aws_region=$AWS_REGION" >> $GITHUB_OUTPUT
+#
+#          AWS_SES_FROM_EMAIL=$(grep "^AWS_SES_FROM_EMAIL=" "$ENV_FILE" | cut -d'=' -f2)
+#          echo "aws_ses_from_email=$AWS_SES_FROM_EMAIL" >> $GITHUB_OUTPUT
+#
+#          FRONTEND_URL=$(grep "^FRONTEND_URL=" "$ENV_FILE" | cut -d'=' -f2)
+#          echo "frontend_url=$FRONTEND_URL" >> $GITHUB_OUTPUT
+#
+#          BACKEND_URL=$(grep "^BACKEND_URL=" "$ENV_FILE" | cut -d'=' -f2)
+#          echo "backend_url=$BACKEND_URL" >> $GITHUB_OUTPUT
+#
+#          CERTBOT_EMAIL=$(grep "^CERTBOT_EMAIL=" "$ENV_FILE" | cut -d'=' -f2)
+#          echo "certbot_email=$CERTBOT_EMAIL" >> $GITHUB_OUTPUT
+#
+#          USE_LETSENCRYPT_STAGING=$(grep "^USE_LETSENCRYPT_STAGING=" "$ENV_FILE" | cut -d'=' -f2)
+#          echo "use_letsencrypt_staging=$USE_LETSENCRYPT_STAGING" >> $GITHUB_OUTPUT
+#
+#          echo "Loaded configuration from $ENV_FILE"
+
+#      - name: Create deployment package
+#        env:
+#          RDS_ENDPOINT: ${{ steps.terraform-outputs.outputs.rds_endpoint }}
+#          DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
+#          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+#          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+#          DOCKER_IMAGE_TAG: ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+#          DB_NAME: ${{ steps.load-env.outputs.db_name }}
+#          DB_USER: ${{ steps.load-env.outputs.db_user }}
+#          DEBUG: ${{ steps.load-env.outputs.debug }}
+#          AWS_REGION: ${{ steps.load-env.outputs.aws_region }}
+#          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#          AWS_SES_FROM_EMAIL: ${{ steps.load-env.outputs.aws_ses_from_email }}
+#          FRONTEND_URL: ${{ steps.load-env.outputs.frontend_url }}
+#          BACKEND_URL: ${{ steps.load-env.outputs.backend_url }}
+#          CERTBOT_EMAIL: ${{ steps.load-env.outputs.certbot_email }}
+#          USE_LETSENCRYPT_STAGING: ${{ steps.load-env.outputs.use_letsencrypt_staging }}
+#        run: |
+#          # Create deployment directory
+#          mkdir -p /tmp/deployment
+#
+#          # Copy deployment files
+#          cp docker-compose.yml /tmp/deployment/
+#          cp docker-compose-cloud.yml /tmp/deployment/
+#          cp -r nginx /tmp/deployment/
+#          cp -r scripts /tmp/deployment/
+#
+#          # Copy redis directory if it exists
+#          if [ -d "redis" ]; then
+#            cp -r redis /tmp/deployment/
+#          fi
+#
+#          cat > /tmp/deployment/.env << ENVEOF
+#          # Django Configuration
+#          DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
+#          DJANGO_IMAGE=${DOCKER_IMAGE_TAG}
+#          DEBUG=${DEBUG}
+#
+#          # Database Configuration
+#          DB_HOST=${RDS_ENDPOINT}
+#          DB_NAME=${DB_NAME}
+#          DB_USER=${DB_USER}
+#          DB_PASSWORD=${DB_PASSWORD}
+#
+#          # Redis Configuration
+#          REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379/0
+#
+#          AWS_REGION=${AWS_REGION}
+#          AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+#          AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+#          AWS_SES_FROM_EMAIL=${AWS_SES_FROM_EMAIL}
+#
+#          FRONTEND_URL=${FRONTEND_URL}
+#
+#          BACKEND_URL=${BACKEND_URL}
+#          CERTBOT_EMAIL=${CERTBOT_EMAIL}
+#          USE_LETSENCRYPT_STAGING=${USE_LETSENCRYPT_STAGING}
+#
+#          ENVEOF
+#
+#          # Create deployment script
+#          cat > /tmp/deployment/deploy.sh << 'DEPLOYEOF'
+#          #!/bin/bash
+#          set -e
+#
+#          cd /home/ec2-user/deployment
+#
+#          # Pull the latest images
+#          docker-compose -f docker-compose.yml -f docker-compose-cloud.yml --env-file .env pull
+#
+#          # Stop existing containers
+#          docker-compose -f docker-compose.yml -f docker-compose-cloud.yml --env-file .env down || true
+#
+#          # Start the application
+#          docker-compose -f docker-compose.yml -f docker-compose-cloud.yml --env-file .env up -d
+#
+#          # Show running containers
+#          echo "Running containers:"
+#          docker ps
+#
+#          echo "Deployment completed successfully!"
+#          DEPLOYEOF
+#
+#          chmod +x /tmp/deployment/deploy.sh
+#
+#          # Create certbot initialization script
+#          cat > /tmp/deployment/init-certbot.sh << 'INITCERTEOF'
+#          #!/bin/bash
+#          set -e
+#
+#          cd /home/ec2-user/deployment
+#
+#          # Source environment variables
+#          source .env
+#
+#          # Check if certificates already exist
+#          if docker-compose -f docker-compose.yml -f docker-compose-cloud.yml run --rm --entrypoint "test -d \"/etc/letsencrypt/live/twinsy-backend\""; then
+#            echo "✅ Certificados SSL ya existen. No es necesario inicializarlos."
+#            exit 0
+#          fi
+#
+#          echo "🔐 Inicializando certificados SSL con Let's Encrypt/Certbot..."
+#
+#          # Read configuration from environment
+#          STAGING="${USE_LETSENCRYPT_STAGING:-true}"
+#
+#
+#          # Convert boolean to 0/1
+#          if [ "$STAGING" = "true" ]; then
+#            STAGING_FLAG="--staging"
+#          else
+#            STAGING_FLAG=""
+#          fi
+#
+#          echo "Configuración:"
+#          echo "  - Dominio: $BACKEND_URL"
+#          echo "  - Email: $CERTBOT_EMAIL"
+#          echo "  - Modo: $([ -n "$STAGING_FLAG" ] && echo 'STAGING' || echo 'PRODUCTION')"
+#
+#          # Create temporary self-signed certificates for nginx to start
+#          echo "📝 Creando certificados temporales autofirmados..."
+#          docker-compose -f docker-compose.yml -f docker-compose-cloud.yml run --rm --entrypoint "/bin/sh" certbot -c "mkdir -p /etc/letsencrypt/live/twinsy-backend && \
+#             openssl req -x509 -nodes -newkey rsa:4096 -days 1 \
+#             -keyout /etc/letsencrypt/live/twinsy-backend/privkey.pem \
+#             -out /etc/letsencrypt/live/twinsy-backend/fullchain.pem \
+#             -subj \"/CN=${BACKEND_URL}\""  || true
+#
+#          # Start nginx with temporary certificates
+#          echo "🔄 Asegurando que nginx esté corriendo..."
+#          docker-compose -f docker-compose.yml -f docker-compose-cloud.yml up -d nginx
+#          sleep 10
+#
+#          docker-compose -f docker-compose.yml -f docker-compose-cloud.yml run --rm --entrypoint "/bin/sh" certbot -c "\
+#            rm -Rf /etc/letsencrypt/live/twinsy-backend && \
+#            rm -Rf /etc/letsencrypt/archive/twinsy-backend && \
+#            rm -Rf /etc/letsencrypt/renewal/twinsy-backend.conf"
+#
+#          # Request real certificates from Let's Encrypt
+#          echo "🔐 Solicitando certificados SSL de Let's Encrypt..."
+#          docker-compose -f docker-compose.yml -f docker-compose-cloud.yml run --rm --entrypoint "/bin/sh" certbot -c "certbot certonly --webroot -w /var/www/certbot \
+#            --email \"$CERTBOT_EMAIL\" \
+#            -d \"$BACKEND_URL\" \
+#            --rsa-key-size 4096 \
+#            --agree-tos \
+#            --non-interactive \
+#            --cert-name twinsy-backend \
+#            $STAGING_FLAG" || {
+#              echo "⚠️ Error al obtener certificados. Verifica:"
+#              echo "   1. El dominio $BACKEND_URL apunta a este servidor"
+#              echo "   2. El puerto 80 está abierto y accesible desde Internet"
+#              echo "   3. No hay cortafuegos bloqueando el tráfico"
+#              exit 1
+#            }
+#
+#          # Reload nginx to use the new certificates
+#          echo "🔄 Recargando nginx con los certificados de Let's Encrypt..."
+#          docker-compose -f docker-compose.yml -f docker-compose-cloud.yml exec nginx nginx -s reload
+#
+#          echo ""
+#          echo "✅ ¡Certificados SSL configurados correctamente!"
+#          echo "   Los certificados se renovarán automáticamente cada 12 horas."
+#          INITCERTEOF
+#
+#          chmod +x /tmp/deployment/init-certbot.sh
+#
+#          # Create a tarball
+#          cd /tmp
+#          tar -czf deployment.tar.gz deployment/
+
+#      - name: Copy files to EC2 using SSM
+#        env:
+#          EC2_INSTANCE_ID: i-0d2e68ef91140e8dd
+#        run: |
+#          # Upload deployment package to S3 (temporary bucket or direct transfer)
+#          # For this implementation, we'll use SSM SendCommand with a script
+#
+#          # Encode the tarball as base64 for transfer
+#          DEPLOYMENT_PACKAGE=$(base64 -w 0 /tmp/deployment.tar.gz)
+#
+#          # Send command to EC2 to receive and extract the package
+#          aws ssm send-command \
+#            --instance-ids "${EC2_INSTANCE_ID}" \
+#            --document-name "AWS-RunShellScript" \
+#            --parameters "commands=[
+#              'sudo rm -rf /home/ec2-user/deployment',
+#              'echo \"${DEPLOYMENT_PACKAGE}\" | base64 -d > /tmp/deployment.tar.gz',
+#              'cd /home/ec2-user',
+#              'tar -xzf /tmp/deployment.tar.gz',
+#              'chown -R ec2-user:ec2-user /home/ec2-user/deployment',
+#              'rm /tmp/deployment.tar.gz'
+#            ]" \
+#            --output text \
+#            --query 'Command.CommandId' > /tmp/command_id.txt
+#
+#          COMMAND_ID=$(cat /tmp/command_id.txt)
+#          echo "Command ID: $COMMAND_ID"
+#
+#          # Wait for command to complete
+#          echo "Waiting for file transfer to complete..."
+#          aws ssm wait command-executed \
+#            --command-id "$COMMAND_ID" \
+#            --instance-id "${EC2_INSTANCE_ID}"
+#
+#          echo "Files transferred successfully"
+
+      - name: Deploy Application via SSM
+        env:
+          EC2_INSTANCE_ID: i-0d2e68ef91140e8dd
+        run: |
+          # Execute deployment script
+          aws ssm send-command \
+            --instance-ids "${EC2_INSTANCE_ID}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "cd contact-us-service",
+              "git reset --hard",
+              "git pull origin main",
+              "docker compose -f contact-us-docker-compose.yml --env-file .env.common --env-file .env.prod up -d --pull always",
+            ]' \
+            --output text
+
+#      - name: Initialize SSL Certificates with Certbot
+#        env:
+#          EC2_INSTANCE_ID: ${{ steps.terraform-outputs.outputs.ec2_instance_id }}
+#        run: |
+#          echo "🔐 Initializing SSL certificates with Certbot..."
+#
+#          # Execute certbot initialization script
+#          aws ssm send-command \
+#            --instance-ids "${EC2_INSTANCE_ID}" \
+#            --document-name "AWS-RunShellScript" \
+#            --parameters 'commands=[
+#              "cd /home/ec2-user/deployment",
+#              "bash init-certbot.sh"
+#            ]' \
+#            --output text \
+#            --query 'Command.CommandId' > /tmp/certbot_command_id.txt
+#
+#          CERTBOT_COMMAND_ID=$(cat /tmp/certbot_command_id.txt)
+#          echo "Certbot Command ID: $CERTBOT_COMMAND_ID"
+#
+#          echo "Waiting for certbot initialization to complete..."
+#          START=$(date +%s)
+#          TIMEOUT=600
+#
+#          while true; do
+#            OUTPUT=$(aws ssm get-command-invocation \
+#              --command-id "$CERTBOT_COMMAND_ID" \
+#              --instance-id "${EC2_INSTANCE_ID}" 2>&1)
+#            RC=$?
+#
+#            if [ $RC -ne 0 ]; then
+#              echo "get-command-invocation error or not yet available"
+#              STATUS="Unknown"
+#            else
+#              STATUS=$(echo "$OUTPUT" | jq -r '.Status // "Unknown"') || STATUS="Unknown"
+#              echo "Current status: $STATUS"
+#            fi
+#
+#            case "$STATUS" in
+#              Success|Failed|TimedOut|Cancelled) break ;;
+#              *) ;;
+#            esac
+#
+#            if [ $(( $(date +%s) - START )) -gt $TIMEOUT ]; then
+#              echo "Timeout waiting for certbot initialization." >&2
+#              echo "Note: Certbot may require the domain to point to this server."
+#              aws ssm get-command-invocation --command-id "$CERTBOT_COMMAND_ID" --instance-id "${EC2_INSTANCE_ID}" --output json || true
+#              # Don't fail the deployment, just warn
+#              echo "⚠️ Certbot initialization timed out. You may need to run it manually."
+#              break
+#            fi
+#
+#            sleep 5
+#          done
+#
+#          echo "Final status: $STATUS"
+#          echo "----- CERTBOT STDOUT -----"
+#          aws ssm get-command-invocation --command-id "$CERTBOT_COMMAND_ID" --instance-id "${EC2_INSTANCE_ID}" --query 'StandardOutputContent' --output text || true
+#
+#          echo "----- CERTBOT STDERR -----"
+#          aws ssm get-command-invocation --command-id "$CERTBOT_COMMAND_ID" --instance-id "${EC2_INSTANCE_ID}" --query 'StandardErrorContent' --output text || true
+#
+#          if [[ "$STATUS" = "Success" ]]; then
+#            echo "✅ SSL certificates initialized successfully!"
+#          else
+#            echo "⚠️ SSL certificate initialization did not complete successfully."
+#            echo "   This may be expected if certificates already exist or if the domain DNS is not configured."
+#            echo "   You can manually run: bash /home/ec2-user/deployment/init-certbot.sh"
+#          fi
+#
+#      - name: Get EC2 Public IP for summary
+#        id: ec2-ip
+#        working-directory: ./terraform
+#        run: |
+#          EC2_IP=$(terraform output -raw ec2_public_ip)
+#          echo "ip=$EC2_IP" >> $GITHUB_OUTPUT
+#
+#      - name: Deployment Summary
+#        env:
+#          BACKEND_URL: ${{ steps.load-env.outputs.backend_url }}
+#        run: |
+#          echo "✅ Deployment completed successfully!"
+#          echo "🌍 Application URL: https://${BACKEND_URL} (or http://${{ steps.ec2-ip.outputs.ip }})"
+#          echo "📊 Environment: ${{ github.event.inputs.environment }}"
+#          echo "🔧 EC2 Instance ID: ${{ steps.terraform-outputs.outputs.ec2_instance_id }}"
+#          echo "💻 Connect via SSM: aws ssm start-session --target ${{ steps.terraform-outputs.outputs.ec2_instance_id }}"
+#          echo ""
+#          echo "🔐 SSL Certificates:"
+#          echo "   Certificates are managed by Let's Encrypt/Certbot"
+#          echo "   Auto-renewal runs every 12 hours"
+#          echo "   To manually initialize: bash /home/ec2-user/deployment/init-certbot.sh"
