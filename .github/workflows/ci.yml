@@ -61,7 +61,9 @@ jobs:
           pip install -r django/src/requirements.txt
 
       - name: Run migrations
-        run: python django/src/manage.py migrate
+        working-directory: django/src
+        run: python manage.py migrate
 
       - name: Run tests
-        run: python django/src/manage.py test
+        working-directory: django/src
+        run: python manage.py test
