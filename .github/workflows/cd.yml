@@ -346,7 +346,7 @@ jobs:
             --instance-ids "${EC2_INSTANCE_ID}" \
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
-              "cd contact-us-service",
+              "cd /home/ec2-user/contact-us-service",
               "# Obtener secretos de AWS Secrets Manager",
               "aws secretsmanager get-secret-value --secret-id contact-us-service/production --query SecretString --output text > /tmp/secrets.json",
               "# Crear archivo .env.secrets",
