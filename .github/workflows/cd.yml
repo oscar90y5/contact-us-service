@@ -348,6 +348,8 @@ jobs:
             --parameters 'commands=[
               "set -e",
               "cd /home/ec2-user/contact-us-service",
+              "# Configurar directorio como seguro para Git",
+              "git config --global --add safe.directory /home/ec2-user/contact-us-service",
               "# Obtener secretos de AWS Secrets Manager",
               "aws secretsmanager get-secret-value --secret-id contact-us-service/production --query SecretString --output text > /tmp/secrets.json",
               "# Crear archivo .env.secrets",
