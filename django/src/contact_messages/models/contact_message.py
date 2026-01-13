@@ -6,12 +6,14 @@ import requests
 class ContactMessage(models.Model):
     origin = models.CharField(max_length=100)
 
-    email = models.EmailField(blank=True, null=True)
+    name = models.CharField(max_length=64, blank=True, null=True)
+    email = models.CharField(max_length=64, blank=True, null=True)
     phone = models.CharField(max_length=20, blank=True, null=True)
 
-    message = models.TextField()
+    message = models.TextField(blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
+
 
     def save(self, *args, **kwargs):
         if self.pk is None:
