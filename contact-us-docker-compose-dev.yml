@@ -1,4 +1,8 @@
 services:
+  contact-us-nginx:
+    volumes:
+      - ./nginx/contact-us-local.crt:/etc/nginx/certs/contact-us-local.crt:ro
+      - ./nginx/contact-us-local.key:/etc/nginx/certs/contact-us-local.key:ro
   contact-us-django:
     # For hot reloading in development.
     volumes:

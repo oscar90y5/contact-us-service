@@ -9,8 +9,8 @@ services:
       - "12000:12000"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/contact-us-local.crt:/etc/nginx/certs/contact-us-local.crt:ro
-      - ./nginx/contact-us-local.key:/etc/nginx/certs/contact-us-local.key:ro
+      - /etc/letsencrypt/live/pro-backend.auri-chatbot.es/fullchain.pem:/etc/nginx/certs/contact-us-local.crt:ro
+      - /etc/letsencrypt/live/pro-backend.auri-chatbot.es/privkey.pem:/etc/nginx/certs/contact-us-local.key:ro
       - static-data:/static:ro
 
   contact-us-django:
