@@ -346,6 +346,7 @@ jobs:
             --instance-ids "${EC2_INSTANCE_ID}" \
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
+              "export HOME=/root",
               "set -e",
               "cd /home/ec2-user/contact-us-service",
               "# Configurar directorio como seguro para Git",
