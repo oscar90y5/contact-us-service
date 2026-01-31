@@ -1,1 +1,1 @@
-from .health_ckech_view import HealthCheckView
+from .health_check_view import HealthCheckView
