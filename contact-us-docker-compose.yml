@@ -5,13 +5,18 @@ services:
     restart: unless-stopped
     depends_on:
       - contact-us-django
-    ports:
-      - "12000:12000"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - /etc/letsencrypt/live/pro-backend.auri-chatbot.es/fullchain.pem:/etc/nginx/certs/contact-us-local.crt:ro
-      - /etc/letsencrypt/live/pro-backend.auri-chatbot.es/privkey.pem:/etc/nginx/certs/contact-us-local.key:ro
       - static-data:/static:ro
+    networks:
+      - proxy
+      - internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.contact-us.rule=Host(`${CONTACT_US_DOMAIN}`)"
+      - "traefik.http.routers.contact-us.entrypoints=websecure"
+      - "traefik.http.routers.contact-us.tls.certresolver=letsencrypt"
+      - "traefik.http.services.contact-us.loadbalancer.server.port=12000"
 
   contact-us-django:
     image: ${DJANGO_IMAGE}
@@ -28,11 +33,11 @@ services:
       DEBUG: ${DEBUG}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
-    ports:
-      - "8000"
     volumes:
       - static-data:/static
     command: ["./entry_point.sh"]
+    networks:
+      - internal
 
   contact-us-db:
     image: "postgres:${POSTGRES_VERSION}"
@@ -44,9 +49,15 @@ services:
       POSTGRES_DB: ${DATABASE_NAME}
     volumes:
       - db-data:/var/lib/postgresql/data
-    ports:
-      - "5432"
+    networks:
+      - internal
 
 volumes:
   db-data:
   static-data:
+
+networks:
+  proxy:
+    external: true
+  internal:
+    internal: true
