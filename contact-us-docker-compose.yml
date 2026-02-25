@@ -10,7 +10,7 @@ services:
       - static-data:/static:ro
     networks:
       - proxy
-      - internal
+      - backend
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.contact-us.rule=Host(`${CONTACT_US_DOMAIN}`)"
@@ -37,7 +37,8 @@ services:
       - static-data:/static
     command: ["./entry_point.sh"]
     networks:
-      - internal
+      - backend
+      - db-network
 
   contact-us-db:
     image: "postgres:${POSTGRES_VERSION}"
@@ -50,7 +51,7 @@ services:
     volumes:
       - db-data:/var/lib/postgresql/data
     networks:
-      - internal
+      - db-network
 
 volumes:
   db-data:
@@ -59,5 +60,6 @@ volumes:
 networks:
   proxy:
     external: true
-  internal:
+  backend:
+  db-network:
     internal: true
